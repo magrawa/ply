@@ -11,19 +11,21 @@ export interface Request extends Test {
     url: string;
     method: string;
     headers: any;
-    body: string | undefined;
+    body?: any;
     submitted?: Date;
     submit(values: object): Promise<Response>;
+    bodyString(): string | undefined;
 }
 
 export class PlyRequest implements Request, PlyTest {
-    type = 'request' as TestType;
-    url: string;
-    method: string;
-    headers: any;
-    body: string | undefined;
-    start?: number;
-    end?: number;
+    readonly type = 'request' as TestType;
+    readonly url: string;
+    readonly method: string;
+    readonly headers: any;
+    readonly body?: any;
+    readonly stringBody?: string;
+    readonly start?: number;
+    readonly end?: number;
     submitted?: Date;
 
     /**
@@ -40,9 +42,22 @@ export class PlyRequest implements Request, PlyTest {
         }
         this.method = obj.method.trim();
         this.headers = obj.headers || {};
-        this.body = obj.body;
+        // convert body to object if exists and parseable
+        this.stringBody = this.body = obj.body;
+        if (typeof this.body === 'string' && this.body.startsWith('{')) {
+            try {
+                this.body = JSON.parse(this.body);
+            } catch (err) {
+                logger.info(`Request '${name}' has unparseable body and will be treated as string`, err.message);
+                logger.debug(err.stack);
+            }
+        }
         this.start = obj.start || 0;
         this.end = obj.end;
+    }
+
+    bodyString(): string | undefined {
+        return this.stringBody;
     }
 
     getSupportedMethod(method: string): string | undefined {
@@ -76,26 +91,40 @@ export class PlyRequest implements Request, PlyTest {
      * @param values
      */
     async submit(values: object): Promise<Response> {
-        return await this.doSubmit(this.getRequest(values));
+        return (await this.doSubmit(values)).response;
     }
 
-    private async doSubmit(requestObj: Request): Promise<PlyResponse> {
+    private async doSubmit(values: object): Promise<PlyResult> {
         const before = new Date().getTime();
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { url, ...fetchRequest } = requestObj;
+
+        const requestObject = this.getRequest(values);
+        this.logger.debug('Request', { ...requestObject, body: this.stringBody });
+
+        const { url: _url, ...fetchRequest } = requestObject;
+        fetchRequest.body = this.stringBody;
         if (this.headers.Authorization) {
             (fetchRequest.headers as any).Authorization = this.headers.Authorization;
         }
-        const response = await this.fetch(requestObj.url, fetchRequest);
+        const response = await this.fetch(requestObject.url, fetchRequest);
         const status = { code: response.status, message: response.statusText };
         const headers = this.responseHeaders(response.headers);
         const body = await response.text();
         const time = new Date().getTime() - before;
-        return new PlyResponse(status, headers, body, time);
+
+        const plyResponse = new PlyResponse(status, headers, body, time);
+        this.logger.debug('Response', { ...plyResponse, body: response.stringBody });
+
+        const result = new PlyResult(
+            this.name,
+            requestObject,
+            plyResponse
+        );
+        return result;
     }
 
     /**
-     * Request object with substituted values
+     * Request object with substituted values.
+     * Body (if present) is parsed to object
      */
     private getRequest(values: object): Request {
         const url = subst.replace(this.url, values, this.logger);
@@ -107,15 +136,27 @@ export class PlyRequest implements Request, PlyTest {
             throw new Error('Unsupported method: ' + method);
         }
         const { Authorization: _auth, ...headers } = this.headers;
+        const stringBody = this.stringBody ? subst.replace(this.stringBody, values, this.logger) : undefined;
+        let body = stringBody;
+        if (body && body.startsWith('{')) {
+            try {
+                body = JSON.parse(body);
+            } catch (err) {
+                this.logger.info(`Substituted request '${name}' has unparseable body and is treated as string`, err.message);
+                this.logger.debug(err.stack);
+            }
+        }
+
         return {
             name: this.name,
             type: this.type,
             url,
             method,
             headers,
-            body: this.body ? subst.replace(this.body, values, this.logger) : undefined,
+            body,
             submitted: this.submitted,
-            submit: () => { throw new Error('Not implemented'); }
+            submit: this.submit,
+            bodyString: () => { return stringBody; }
          };
     }
 
@@ -136,15 +177,8 @@ export class PlyRequest implements Request, PlyTest {
     async run(runtime: Runtime): Promise<PlyResult> {
         this.submitted = new Date();
         this.logger.info(`Request '${this.name}' submitted at ${this.submitted.timestamp(runtime.locale)}`);
-        const requestObject = this.getRequest(runtime.values);
-        this.logger.debug('Request', requestObject);
-        const response = await this.doSubmit(requestObject);
-        this.logger.debug('Response', response);
-        const result = new PlyResult(
-            this.name,
-            requestObject,
-            response.getResponse(runtime.options)
-        );
+        const result = await this.doSubmit(runtime.values);
+        result.response = (result.response as PlyResponse).getResponse(runtime.options);
         return result;
     }
 }

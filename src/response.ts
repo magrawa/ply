@@ -9,17 +9,29 @@ export interface Status {
 export interface Response {
     status: Status;
     headers: any;
-    body?: string;
+    body?: any;
     time?: number;
 }
 
 export class PlyResponse implements Response {
+
+    readonly stringBody?: string;
 
     constructor(
         readonly status: Status,
         readonly headers: any,
         readonly body?: string,
         readonly time?: number) {
+
+        this.stringBody = this.body = body;
+        // convert body to object if exists and parseable
+        if (body && body.startsWith('{')) {
+            try {
+                this.body = JSON.parse(body);
+            } catch (err) {
+                // can't be parsed -- leave as string
+            }
+        }
     }
 
     /**
@@ -34,13 +46,8 @@ export class PlyResponse implements Response {
         });
 
         let body = this.body;
-        if (body && body?.startsWith('{')) {
-            if (options.responseBodySortedKeys) {
-                body = stringify(JSON.parse(body), { space: ''.padStart(options.prettyIndent || 0, ' ') });
-            }
-            else {
-                body = JSON.stringify(JSON.parse(body), null, options.prettyIndent);
-            }
+        if (typeof body === 'object' && options.responseBodySortedKeys) {
+            body = JSON.parse(stringify(body));
         }
 
         return {

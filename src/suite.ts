@@ -188,16 +188,14 @@ export class Suite<T extends Test> {
                             // verify request result (otherwise wait until case/workflow is complete)
                             let verifier = new Verifier(await this.runtime.results.getExpectedYaml(test.name), this.logger, resultsStartLine);
                             this.log.info(`Comparing ${this.runtime.results.expected.location} vs ${this.runtime.results.actual.location}`);
-                            let outcome = verifier.verify(actualYaml, {
-                                __ply_request: plyResult.request,
-                                __ply_response: plyResult.response,
-                                ...values
-                            });
+                            let outcome = verifier.verify(actualYaml, values);
                             result = { ...result as Result, ...outcome };
                             this.logOutcome(test, outcome);
                         }
                     }
                     results.push(result);
+                    // add request/response to values
+                    console.log('here is where');
                 }
                 else {
                     // case/workflow run complete -- verify result

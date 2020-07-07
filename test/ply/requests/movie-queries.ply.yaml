@@ -7,7 +7,7 @@ moviesByYearAndRating:
 
 # TODO uses id from above response
 movieById:
-  url:  '${baseUrl}/${id}' # '${baseUrl}/${@movieByYearAndRating.response.body.movies[0].id}' # accessing id from previous response
+  url:  '${baseUrl}/${@movieByYearAndRating.response.body.movies[0].id}' # id comes from previous response
   method: GET
   headers:
     Accept: application/json
